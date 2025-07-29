@@ -30,7 +30,7 @@ takingphoto.py
 
 ## Dataset Annotation
 
-All training images were annotated using [CVAT](https://cvat.org/) with YOLO segmentation format.
+All training images were annotated using [CVAT](https://app.cvat.ai/tasks) with YOLO segmentation format, primarily using polygon-shaped annotations for masking.
 
 
 # Contact classification
