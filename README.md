@@ -23,10 +23,15 @@ This script configures a Linux webcam using `v4l2-ctl` commands to manually set 
 camera_tuning.py
 ```
 ## Webcam Image Capture Tool for ProTac Dataset
-This script captures frames from the webcam and allows the user to save images interactively by pressing keys.
+This script captures frames from the webcam and allows the user to save images interactively by pressing keys. The images can be used for annotation ()
 ```
 takingphoto.py
 ```
+
+## Dataset Annotation
+
+All training images were annotated using [CVAT](https://cvat.org/) with YOLO segmentation format.
+
 
 # Contact classification
 
@@ -38,12 +43,12 @@ Contact_YOLO_CNN_BlackandWhite_classes.py
 ## Contact Detection System using YOLO and CNN Classifier with Camera Tuning (v4l2-ctl for linux)
 This script performs real-time classification of contact state using YOLO with camera tuning
 ```
-Contact_YOLO_CNN_with_camera_tuning.py
+Contact_YOLO_CNN_with_camera_tuning_v4l2_ctl.py
 ```
 ## Contact Detection System using YOLO and CNN Classifier with Camera Tuning (opencv) 
 This script performs real-time classification of contact state using YOLO with camera tuning
 ```
-Contact_YOLO_CNN_with_camera_tuning_v4l2_ctl.py
+Contact_YOLO_CNN_with_camera_tuning_opencv.py
 ```
 ## Contact Direction Classification System using YOLO and CNN
 This script performs real-time classification of contact direction based on webcam
@@ -71,7 +76,8 @@ This script detects and tracks elliptical markers from webcam input in real time
 Segmentation_ID.py
 ```
 ## YOLO Marker Detection Download Training Script
-This script loads a specific YOLO model from Ultralytics Hub and begins training with the dataset specified in Ultralytics settings or configuration file.
+This script loads a specific YOLO model from Ultralytics Hub and begins training with the dataset specified in Ultralytics settings or configuration file using [Ultralytics HUB](https://hub.ultralytics.com/).  
+
 ```
 Ultralytic_Download.py
 ```
@@ -101,3 +107,7 @@ This script runs real-time object detection using a YOLOv5 model exported to ONN
 YOLOv5Binary.py
 ```
 
+
+
+
+Git repo in peem, Public
