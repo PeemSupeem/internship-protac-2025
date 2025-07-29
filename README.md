@@ -1,3 +1,6 @@
+# ProTac Real-Time Contact Classification and Marker Detection
+This repository contains real-time vision-based pipelines for contact marker detection, classification, dataset generation, and camera tuning using YOLO, CNN, and OpenCV. Scripts are organized for both training and deployment on ProTac-integrated robotic systems. This repository includes several experimental scripts involving YOLO-based methods. Some scripts were developed through trial and error and may not be fully functional or optimized.
+
 # Binary mask dataset preparation
 
 ## Real-time Marker Detection with YOLO + SORT Tracker
