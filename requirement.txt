@@ -1,0 +1,9 @@
+numpy
+opencv-python
+torch>=2.0.0
+torchvision>=0.15.0
+ultralytics>=8.0.0
+Pillow
+
+# Optional: For Linux webcam tuning (only needed if using v4l2-ctl commands)
+v4l2ctl; sys_platform == "linux"

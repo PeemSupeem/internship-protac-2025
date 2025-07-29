@@ -1,0 +1,5 @@
+path: /home/forall/Desktop/peem/Newermarker
+train: /home/forall/Desktop/peem/Newermarker/images/train
+val: /home/forall/Desktop/peem/Newermarker/images/train
+nc: 1  # number of classes
+names: ['marker']  # your class name(s)

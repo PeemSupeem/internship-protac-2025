@@ -1,0 +1,137 @@
+"""
+Contact Classification with YOLO Box Detection and Ellipse Filtering
+
+Description:
+This script performs real-time classification of contact state using:
+    - YOLOv8 for detecting markers with class labels (white marker/black area)
+    - Ellipse construction from YOLO bounding boxes 
+    - Conditional filtering: fallback to black marker if <13 white markers found
+    - CNN classifier for "Contact" vs "Non-Contact"
+    - Optional webcam tuning via `v4l2-ctl` (Linux only)
+
+Outputs:
+    - Composite ellipse canvas (white & dim white)
+    - CNN classification result
+    - FPS measurements for YOLO, CNN, and total
+
+Controls:
+    - 'q': Quit the program
+
+Dependencies:
+    - opencv-python
+    - numpy
+    - torch
+    - torchvision
+    - ultralytics
+    - Pillow
+    - v4l-utils (Linux only, for camera control)
+
+"""
+
+
+import cv2
+import numpy as np
+import torch
+from torchvision import transforms
+import time
+from ultralytics import YOLO
+import os
+
+# ========== CONFIG ==========
+model = YOLO('https://hub.ultralytics.com/models/tOiUrSrUhF6MlFafEx3g')
+
+cnn_path = 'Contact_classifier_model/contact_classifier/contact_classifier_2.pth'
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+cnn_model = torch.load(cnn_path, map_location=device)
+cnn_model.eval().to(device)
+
+transform = transforms.Compose([
+    transforms.ToPILImage(),
+    transforms.Resize((64, 64)),
+    transforms.ToTensor(),
+    transforms.Normalize([0.5]*3, [0.5]*3)
+])
+
+cap = cv2.VideoCapture(0)
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+
+# Set camera controls via v4l2-ctl (optional tuning)
+os.system("v4l2-ctl -d /dev/video0 --set-ctrl=auto_exposure=1")
+os.system("v4l2-ctl -d /dev/video0 --set-ctrl=exposure_time_absolute=50")
+os.system("v4l2-ctl -d /dev/video0 --set-ctrl=brightness=3")
+os.system("v4l2-ctl -d /dev/video0 --set-ctrl=contrast=25")
+os.system("v4l2-ctl -d /dev/video0 --set-ctrl=saturation=60")
+os.system("v4l2-ctl -d /dev/video0 --set-ctrl=sharpness=2")
+os.system("v4l2-ctl -d /dev/video0 --set-ctrl=gamma=100")
+os.system("v4l2-ctl -d /dev/video0 --set-ctrl=backlight_compensation=1")
+os.system("v4l2-ctl -d /dev/video0 --set-ctrl=gain=0")
+
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        break
+
+    start_time = time.time()
+    results = model.predict(source=frame, conf=0.7, verbose=False, imgsz=640)
+    detect_time = time.time()
+
+    ellipse_canvas = np.zeros_like(frame)
+
+    class_0_contours = []  # white markers
+    class_1_contours = []  # black markers
+
+    for r in results:
+        boxes = r.boxes
+        if boxes is None:
+            continue
+
+        for box, cls in zip(boxes.xyxy.cpu().numpy().astype(int), boxes.cls.cpu().numpy().astype(int)):
+            x1, y1, x2, y2 = box
+            w, h = x2 - x1, y2 - y1
+            cx, cy = x1 + w // 2, y1 + h // 2
+
+            contour = cv2.ellipse2Poly((cx, cy), (w//2, h//2), 0, 0, 360, 10)
+            if cls == 0:
+                class_0_contours.append(contour)
+            elif cls == 1:
+                class_1_contours.append(contour)
+
+    # White marker ellipses (always)
+    for cnt in class_0_contours:
+        if len(cnt) >= 5:
+            cv2.fillPoly(ellipse_canvas, [cnt], (255, 255, 255))  # solid white
+
+    # Black marker ellipses (only if white marker count is insufficient)
+    if len(class_0_contours) < 13:
+        for cnt in class_1_contours:
+            if len(cnt) >= 5:
+                cv2.fillPoly(ellipse_canvas, [cnt], (180, 180, 180))  # dimmer white
+
+    # CNN classification
+    input_tensor_cnn = transform(ellipse_canvas).unsqueeze(0).to(device)
+    with torch.no_grad():
+        output = cnn_model(input_tensor_cnn)
+        _, predicted = torch.max(output, 1)
+        label = "Contact" if predicted.item() == 0 else "Non-Contact"
+    class_time = time.time()
+
+    # Display FPS and label
+    detect_fps = 1.0 / (detect_time - start_time)
+    class_fps = 1.0 / (class_time - detect_time)
+    total_fps = 1.0 / (class_time - start_time)
+
+    display = ellipse_canvas.copy()
+    cv2.putText(display, f"YOLO FPS: {detect_fps:.2f}", (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0,255,255), 1)
+    cv2.putText(display, f"CNN FPS: {class_fps:.2f}", (10, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255,128,0), 1)
+    cv2.putText(display, f"Total FPS: {total_fps:.2f}", (10, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200,200,255), 1)
+    cv2.putText(display, f"{label}", (10, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,0) if label=="Contact" else (0,0,255), 2)
+
+    cv2.imshow("Raw Frame", frame)
+    cv2.imshow("Ellipse + Classification", display)
+
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+cap.release()
+cv2.destroyAllWindows()

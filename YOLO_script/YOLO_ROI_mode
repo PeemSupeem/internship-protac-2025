@@ -1,0 +1,217 @@
+"""
+Dynamic Contact Classification with YOLO, CNN, and ROI Switching
+
+Description:
+This script performs real-time contact detection from webcam using:
+    - YOLO segmentation or bounding box inference
+    - Contour-based ellipse fitting
+    - CNN classifier to determine contact state
+    - ROI fallback mode when global detection fails
+
+Outputs:
+    - White ellipse mask from full frame or ROI
+    - CNN-based contact classification ("Contact" / "Non-Contact")
+    - FPS overlay and detection status
+
+Controls:
+    - 'q': Quit the program
+
+Dependencies:
+    - opencv-python
+    - numpy
+    - torch
+    - torchvision
+    - ultralytics
+    - Pillow
+
+"""
+
+
+import cv2
+import numpy as np
+import torch
+from torchvision import transforms
+import time
+from ultralytics import YOLO
+import os
+
+
+model = YOLO('runs/segment/train3/weights/best.pt')
+cnn_path = "Contact_classifier_model/contact_classifier/contact_classifier_2.pth"
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+cnn_model = torch.load(cnn_path, map_location=device)
+cnn_model.eval().to(device)
+
+transform = transforms.Compose([
+    transforms.ToPILImage(),
+    transforms.Resize((64, 64)),
+    transforms.ToTensor(),
+    transforms.Normalize([0.5]*3, [0.5]*3)
+])
+
+marker_rois = [
+    (16, 95, 74, 180),
+    (78, 408, 162, 476),
+    (471, 403, 551, 470),
+    (538, 93, 602, 164),
+    (285, 78, 335, 126),
+    (156, 164, 207, 216),
+    (191, 318, 236, 358),
+    (383, 315, 426, 355),
+    (410, 163, 456, 209),
+    (293, 140, 325, 170),
+    (218, 190, 247, 223),
+    (240, 287, 268, 316),
+    (354, 282, 383, 311),
+    (373, 187, 404, 220)
+]
+
+cap = cv2.VideoCapture(0)
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+
+use_roi_mode = False  # Start in normal global detection mode
+
+def pad_to_stride(img, stride=32):
+    h, w = img.shape[:2]
+    new_h = ((h + stride - 1) // stride) * stride
+    new_w = ((w + stride - 1) // stride) * stride
+    padded = np.zeros((new_h, new_w, 3), dtype=img.dtype)
+    padded[:h, :w] = img
+    return padded
+
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        break
+
+    t_start = time.time()
+    H, W = frame.shape[:2]
+    ellipse_canvas = np.zeros((H, W, 3), dtype=np.uint8)
+    contact_found = False
+
+    if not use_roi_mode:
+        # === YOLO on the whole frame ===
+        results = model.predict(source=frame, conf=0.3, verbose=False, imgsz=640)
+        mask_canvas = np.zeros((H, W), dtype=np.uint8)
+        found_poly = False
+        for r in results:
+            if hasattr(r, "masks") and r.masks is not None and hasattr(r.masks, "xy"):
+                for poly in r.masks.xy:
+                    pts = np.array(poly, dtype=np.int32)
+                    cv2.fillPoly(mask_canvas, [pts], 255)
+                found_poly = True
+
+        if not found_poly:
+            for r in results:
+                for box in r.boxes.xyxy.cpu().numpy().astype(int):
+                    x1, y1, x2, y2 = box
+                    cv2.rectangle(mask_canvas, (x1, y1), (x2, y2), 255, -1)
+
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        mask_clean = cv2.morphologyEx(mask_canvas, cv2.MORPH_OPEN, kernel)
+        mask_clean = cv2.morphologyEx(mask_clean, cv2.MORPH_CLOSE, kernel)
+
+        contours, _ = cv2.findContours(mask_clean, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for cnt in contours:
+            if len(cnt) >= 5 and cv2.contourArea(cnt) > 80:
+                ellipse = cv2.fitEllipse(cnt)
+                cv2.ellipse(ellipse_canvas, ellipse, (255, 255, 255), -1)
+
+        # --- Classify with CNN ---
+        input_tensor_cnn = transform(ellipse_canvas).unsqueeze(0).to(device)
+        with torch.no_grad():
+            output = cnn_model(input_tensor_cnn)
+            _, predicted = torch.max(output, 1)
+            label = "Contact" if predicted.item() == 0 else "Non-Contact"
+        if label == "Contact":
+            contact_found = True
+        else:
+            contact_found = False
+            use_roi_mode = True  # Activate ROI mode next frame
+
+    else:
+        # === ROI mode: process all ROIs, OR until contact found ===
+        ellipse_canvas = np.zeros((H, W, 3), dtype=np.uint8)
+        for x1, y1, x2, y2 in marker_rois:
+            # --- Clamp ROI to frame bounds ---
+            x1c = max(0, min(x1, W - 1))
+            x2c = max(0, min(x2, W))
+            y1c = max(0, min(y1, H - 1))
+            y2c = max(0, min(y2, H))
+            if x1c >= x2c or y1c >= y2c:
+                continue
+
+            roi_crop = frame[y1c:y2c, x1c:x2c]
+            roi_crop = pad_to_stride(roi_crop, stride=32)
+            if roi_crop.size == 0:
+                continue
+
+            results = model.predict(source=roi_crop, conf=0.3, verbose=False, imgsz=roi_crop.shape[1])
+            mask_canvas = np.zeros((roi_crop.shape[0], roi_crop.shape[1]), dtype=np.uint8)
+            found_poly = False
+            for r in results:
+                if hasattr(r, "masks") and r.masks is not None and hasattr(r.masks, "xy"):
+                    for poly in r.masks.xy:
+                        pts = np.array(poly, dtype=np.int32)
+                        cv2.fillPoly(mask_canvas, [pts], 255)
+                    found_poly = True
+
+            if not found_poly:
+                for r in results:
+                    for box in r.boxes.xyxy.cpu().numpy().astype(int):
+                        bx1, by1, bx2, by2 = box
+                        cv2.rectangle(mask_canvas, (bx1, by1), (bx2, by2), 255, -1)
+
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+            mask_clean = cv2.morphologyEx(mask_canvas, cv2.MORPH_OPEN, kernel)
+            mask_clean = cv2.morphologyEx(mask_clean, cv2.MORPH_CLOSE, kernel)
+
+            contours, _ = cv2.findContours(mask_clean, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            local_ellipse_canvas = np.zeros((roi_crop.shape[0], roi_crop.shape[1], 3), dtype=np.uint8)
+            for cnt in contours:
+                if len(cnt) >= 5 and cv2.contourArea(cnt) > 80:
+                    ellipse = cv2.fitEllipse(cnt)
+                    cv2.ellipse(local_ellipse_canvas, ellipse, (255, 255, 255), -1)
+
+            # --- Classify with CNN for this ROI ---
+            input_tensor_cnn = transform(local_ellipse_canvas).unsqueeze(0).to(device)
+            with torch.no_grad():
+                output = cnn_model(input_tensor_cnn)
+                _, predicted = torch.max(output, 1)
+                label = "Contact" if predicted.item() == 0 else "Non-Contact"
+
+            # --- Bitwise OR with shape check ---
+            # Calculate target region in the main canvas
+            main_region = ellipse_canvas[y1c:y2c, x1c:x2c]
+            min_h = min(main_region.shape[0], local_ellipse_canvas.shape[0])
+            min_w = min(main_region.shape[1], local_ellipse_canvas.shape[1])
+            if min_h > 0 and min_w > 0:
+                main_crop = main_region[:min_h, :min_w]
+                local_crop = local_ellipse_canvas[:min_h, :min_w]
+                ellipse_canvas[y1c:y1c+min_h, x1c:x1c+min_w] = cv2.bitwise_or(main_crop, local_crop)
+
+            if label == "Contact":
+                contact_found = True  # If ANY ROI found contact, turn off ROI mode
+
+        if contact_found:
+            use_roi_mode = False
+
+    # --- Display both normal frame and ellipse_canvas with FPS ---
+    t_end = time.time()
+    total_fps = 1.0 / (t_end - t_start)
+    ellipse_canvas_disp = ellipse_canvas.copy()
+    cv2.putText(ellipse_canvas_disp, f"Total FPS: {total_fps:.2f}", (10, 25),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,255), 2)
+    cv2.putText(ellipse_canvas_disp, f"{label}", (10, 75),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,0) if label=="Contact" else (0,0,255), 2)
+
+    cv2.imshow("Camera", frame)
+    cv2.imshow("Ellipse Canvas", ellipse_canvas_disp)
+
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+cap.release()
+cv2.destroyAllWindows()

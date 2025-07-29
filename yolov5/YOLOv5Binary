@@ -1,0 +1,116 @@
+"""
+ONNX-based YOLOv5 Inference with Ellipse Mask Generation
+
+Description:
+This script runs real-time object detection using a YOLOv5 model exported to ONNX.
+It performs:
+    - Preprocessing webcam frames for ONNX input
+    - Running inference using ONNX Runtime
+    - Postprocessing outputs to extract bounding boxes
+    - Drawing filled ellipses from YOLOv5 bounding boxes
+    - FPS overlay on output canvas
+
+Outputs:
+    - Single-channel ellipse mask image (white on black)
+    - Real-time FPS display
+    - Displayed window: "YOLOv5n ONNX Detection with Ellipse"
+
+Controls:
+    - 'q': Quit the program
+
+Dependencies:
+    - opencv-python
+    - numpy
+    - onnxruntime
+
+"""
+
+
+import cv2
+import numpy as np
+import onnxruntime as ort
+import time
+
+# ======== CONFIG ========
+onnx_path = "yolov5/runs/train/marker_seg/weights/best.onnx"
+img_size = 320      
+conf_threshold = 0.4
+iou_threshold = 0.45
+
+# ======== LOAD MODEL ========
+session = ort.InferenceSession(onnx_path, providers=["CPUExecutionProvider"])
+input_name = session.get_inputs()[0].name
+output_name = session.get_outputs()[0].name
+
+# ======== HELPER FUNCTIONS ========
+def preprocess(frame):
+    img = cv2.resize(frame, (img_size, img_size))
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    img = img.astype(np.float32) / 255.0
+    img = np.transpose(img, (2, 0, 1))  # HWC to CHW
+    img = np.expand_dims(img, axis=0)   # Add batch
+    return img
+
+def postprocess(preds, frame_shape):
+    preds = preds[0]  # (6300, 6)
+    boxes, scores, class_ids = [], [], []
+
+    frame_h, frame_w = frame_shape[:2]
+    for pred in preds:
+        x_c, y_c, w, h, conf, cls_id = pred
+        if conf > conf_threshold:
+            # Convert YOLO [center_x, center_y, w, h] to box corners
+            x1 = int((x_c - w / 2) / img_size * frame_w)
+            y1 = int((y_c - h / 2) / img_size * frame_h)
+            x2 = int((x_c + w / 2) / img_size * frame_w)
+            y2 = int((y_c + h / 2) / img_size * frame_h)
+            boxes.append([x1, y1, x2 - x1, y2 - y1])  # (x, y, w, h)
+            scores.append(float(conf))
+            class_ids.append(int(cls_id))
+
+    indices = cv2.dnn.NMSBoxes(boxes, scores, conf_threshold, iou_threshold)
+    result = []
+    if len(indices) > 0:
+        for i in indices.flatten():
+            result.append((boxes[i], scores[i], class_ids[i]))
+    return result
+
+# ======== MAIN LOOP ========
+cap = cv2.VideoCapture(0)
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, img_size)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, img_size)
+
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        break
+    start_time = time.time()
+
+    input_tensor = preprocess(frame)
+    preds = session.run([output_name], {input_name: input_tensor})[0]  # shape: (1, 6300, 6)
+    detections = postprocess(preds, frame.shape)
+
+    # Draw boxes and fill mask
+    H, W = frame.shape[:2]
+    ellipse_canvas = np.zeros((H, W), dtype=np.uint8)  # Single-channel, black
+
+    for (box, score, cls_id) in detections:
+        x , y, w, h = box  # box = [x, y, w, h]
+        # Center of ellipse
+        center = (x + w // 2, y + h // 2)
+        axes = (max(w // 2, 1), max(h // 2, 1))  # axes lengths
+        angle = 0  # or random angle if needed
+        # Draw filled white ellipse
+        cv2.ellipse(ellipse_canvas, center, axes, angle, 0, 360, 255, -1)
+
+    elapsed_time = time.time() - start_time
+    fps = 1.0 / elapsed_time
+    cv2.putText(ellipse_canvas, f"FPS: {fps:.2f}", (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+
+    cv2.imshow("YOLOv5n ONNX Detection with Ellipse", ellipse_canvas)
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+cap.release()
+cv2.destroyAllWindows()

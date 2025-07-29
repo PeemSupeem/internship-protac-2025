@@ -1,0 +1,8 @@
+path:  # leave blank if uploading to Ultralytics HUB
+
+train: images/train
+val: images/val
+test:  images/test
+
+names:
+  0: marker

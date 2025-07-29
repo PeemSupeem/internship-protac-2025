@@ -1,0 +1,10 @@
+# Define dataset root path if local (optional for HUB)
+path:  # leave blank if uploading to Ultralytics HUB
+
+train: images/train
+val: images/val
+test:  images/test
+
+# Define your class(es)
+names:
+  0: marker

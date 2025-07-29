@@ -1,0 +1,20 @@
+"""
+YOLO Model Export to ONNX Format
+
+Description:
+This script loads a YOLO PyTorch model and exports it to ONNX format
+for deployment or inference using ONNX-compatible backends.
+
+Output:
+    - best.onnx file saved in the same directory as the original `.pt` model
+
+Dependencies:
+    - ultralytics
+    - onnxruntime (optional, for verification)
+"""
+
+
+from ultralytics import YOLO
+import onnxruntime as ort
+model = YOLO('weights/hub/Rr0ta5z4hkQFFLPyMKbM/best.pt')
+model.export(format='onnx', imgsz=640)

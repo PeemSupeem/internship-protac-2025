@@ -1,0 +1,37 @@
+
+"""
+Webcam Manual Tuning using v4l2-ctl
+
+Description:
+This script configures a Linux webcam (e.g., /dev/video0) using `v4l2-ctl` commands
+to manually set exposure and image properties for more consistent video capture.
+
+Tuned Parameters:
+    - auto_exposure: 1 (manual mode)
+    - exposure_time_absolute: 50
+    - brightness: 3
+    - contrast: 25
+    - saturation: 60
+    - sharpness: 2
+    - gamma: 100
+    - backlight_compensation: 1
+    - gain: 0
+
+Dependencies:
+    - v4l2-ctl (comes with `v4l-utils`, required for Linux)
+    - os (Python built-in)
+
+Note:
+This script is only applicable on Linux systems where `v4l2-ctl` is available.
+"""
+import os
+
+os.system("v4l2-ctl -d /dev/video0 --set-ctrl=auto_exposure=1")
+os.system("v4l2-ctl -d /dev/video0 --set-ctrl=exposure_time_absolute=50")
+os.system("v4l2-ctl -d /dev/video0 --set-ctrl=brightness=3")
+os.system("v4l2-ctl -d /dev/video0 --set-ctrl=contrast=25")
+os.system("v4l2-ctl -d /dev/video0 --set-ctrl=saturation=60")
+os.system("v4l2-ctl -d /dev/video0 --set-ctrl=sharpness=2")
+os.system("v4l2-ctl -d /dev/video0 --set-ctrl=gamma=100")
+os.system("v4l2-ctl -d /dev/video0 --set-ctrl=backlight_compensation=1")
+os.system("v4l2-ctl -d /dev/video0 --set-ctrl=gain=0")
